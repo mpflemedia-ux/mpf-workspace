@@ -19838,6 +19838,24 @@ function _brParseHLB(lines) {
 // Year extracted from statement header.
 // Verified via balance math from Clore Dec 2025 statement.
 
+// Recover a PDF-extraction artifact: sub-RM1 amounts sometimes lose their leading "0"
+// (e.g. "0.50+" extracts as ".50+"), which the amount regex then can't match (it
+// requires a digit immediately before the decimal point). Plain string/char checks
+// only — no regex fallback — so there's no possibility of backtracking cost.
+function _brFixLeadingZero(s) {
+  let idx = s.indexOf(' .');
+  while (idx !== -1) {
+    const d1 = s[idx+2], d2 = s[idx+3], sign = s[idx+4];
+    if (d1 >= '0' && d1 <= '9' && d2 >= '0' && d2 <= '9' && (sign === '+' || sign === '-')) {
+      s = s.slice(0, idx+1) + '0' + s.slice(idx+1);
+      idx = s.indexOf(' .', idx+5);
+    } else {
+      idx = s.indexOf(' .', idx+2);
+    }
+  }
+  return s;
+}
+
 function _brParseMaybank(lines) {
   let stmtYear = new Date().getFullYear();
   const headerBlock = lines.slice(0, 60).join(' ');
@@ -19863,7 +19881,7 @@ function _brParseMaybank(lines) {
   let inFooter = false;
 
   lines.forEach(line => {
-    const l = line.trim();
+    const l = _brFixLeadingZero(line.trim());
     if (!l) return;
     // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
     if (inFooter) return;
