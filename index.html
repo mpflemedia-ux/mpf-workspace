@@ -19832,11 +19832,7 @@ function _brParseMaybank(lines) {
   const transactions = [];
   let cur = null;
   const dateRe = /^(\d{2})\/(\d{2})(?:\/\d{2,4})?\s+(.*)/;
-  // [\d,]* (not +): PDF text extraction sometimes drops the leading "0" on sub-RM1
-  // amounts (e.g. "0.50+" extracts as ".50+"). parseFloat('.50') already yields 0.5
-  // correctly, so widening the digit group to allow zero leading digits recovers
-  // these without any other change to amount parsing.
-  const amtRe = /([\d,]*\.\d{2})([+-])/;
+  const amtRe = /([\d,]+\.\d{2})([+-])/;
   const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\))/i;
 
   // Footer block marker — once triggered, ignore all remaining lines
