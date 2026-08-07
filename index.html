@@ -19326,6 +19326,7 @@ window.addEventListener('beforeunload', function(e) {
 
 let _brPDFData = null; // extracted transactions from PDF
 let _brFooterData = null; // bank's own summary figures from PDF footer
+let _brMatchOptHtmlCache = ''; // full <option> list for the "match" dropdown, built once per render, injected lazily per-row on focus
 
 // Load pdf.js from CDN dynamically
 function _loadPDFJS() {
@@ -20358,14 +20359,14 @@ function _brRenderPDFReview() {
   const allTxns  = (prof?.transactions || APP.transactions || []).map(x => ({id:'txn_'+x.id, label:`[TXN] ${x.date} — ${x.desc||x.category} — RM${(x.amount||0).toFixed(2)}`}));
   const matchOptions = [...allSales, ...allPurch, ...allTxns];
   const matchOptHtml = '<option value="">-- Tiada padanan --</option>' + matchOptions.map(m=>`<option value="${m.id}">${_brEsc(m.label)}</option>`).join('');
+  // Cache the full list once; rows below inject it lazily (on focus) instead of embedding
+  // it per-row — with large sales/purchases/transactions volumes, embedding it in every
+  // row multiplied the render's total HTML size by row count and froze the tab.
+  _brMatchOptHtmlCache = matchOptHtml;
+  const matchOptById = new Map(matchOptions.map(m => [m.id, m.label]));
 
   const clientOptHtml = '<option value="">— Internal —</option>' +
     (APP.clients||[]).map(c=>`<option value="${c.id}">${_brEsc(c.name)}</option>`).join('');
-
-  // TEMP-DEBUG: read-only size check — no logic change. Confirming whether the per-row
-  // embedded dropdown HTML (matchOptHtml/clientOptHtml, repeated once per _brPDFData row
-  // below) is large enough to explain the render freeze on the Aug 2025 statement.
-  console.log(`[BR-RENDER-DEBUG] matchOptions.length=${matchOptions.length} matchOptHtml.length=${matchOptHtml.length} clientOptHtml.length=${clientOptHtml.length} _brPDFData.length=${_brPDFData.length}`);
 
   const rows = _brPDFData.map((t, i) => {
     const dupBadge = t.isDuplicate ? '<span style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.3);padding:1px 5px;border-radius:4px;font-size:10px;">DUP</span>' : '';
@@ -20388,8 +20389,8 @@ function _brRenderPDFReview() {
           ${clientOptHtml.replace(/<option value="">/,`<option value="" ${!t.clientId?'selected':''}>`)
             .replace(/(<option value="(\d+)">)/g, (m,tag,id) => t.clientId==id ? tag.replace('>','selected>') : tag)}
         </select>
-        <select style="flex:1;font-size:10px;padding:2px 4px;background:var(--bg2);border:1px solid rgba(99,102,241,.3);border-radius:4px;color:var(--text);min-width:0;" onchange="_brPDFMatchChange(${i},this.value)" title="Padankan dengan rekod sedia ada">
-          ${matchOptHtml}
+        <select style="flex:1;font-size:10px;padding:2px 4px;background:var(--bg2);border:1px solid rgba(99,102,241,.3);border-radius:4px;color:var(--text);min-width:0;" onchange="_brPDFMatchChange(${i},this.value)" onfocus="_brPDFLazyMatchOptions(this,${i})" title="Padankan dengan rekod sedia ada">
+          ${t.matchId ? `<option value="">-- Tiada padanan --</option><option value="${_brEsc(t.matchId)}" selected>${_brEsc(matchOptById.get(t.matchId) || t.matchId)}</option>` : '<option value="">-- Tiada padanan --</option>'}
         </select>
       </div>
     </div>`;
@@ -20409,6 +20410,16 @@ function _brPDFMatchChange(idx, matchId) {
   if (_brPDFData && _brPDFData[idx]) {
     _brPDFData[idx].matchId = matchId || null;
   }
+}
+
+// Lazily populate the full "match" dropdown options on first focus, instead of embedding
+// them in every row's HTML upfront (see _brRenderPDFReview / _brMatchOptHtmlCache).
+function _brPDFLazyMatchOptions(selectEl, idx) {
+  if (selectEl.dataset.lazyLoaded) return;
+  selectEl.dataset.lazyLoaded = '1';
+  const curVal = (_brPDFData && _brPDFData[idx] && _brPDFData[idx].matchId) || '';
+  selectEl.innerHTML = _brMatchOptHtmlCache;
+  selectEl.value = curVal;
 }
 
 function _brPDFCatChange(idx, cat) {
