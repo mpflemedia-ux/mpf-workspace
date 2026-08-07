@@ -20362,6 +20362,11 @@ function _brRenderPDFReview() {
   const clientOptHtml = '<option value="">— Internal —</option>' +
     (APP.clients||[]).map(c=>`<option value="${c.id}">${_brEsc(c.name)}</option>`).join('');
 
+  // TEMP-DEBUG: read-only size check — no logic change. Confirming whether the per-row
+  // embedded dropdown HTML (matchOptHtml/clientOptHtml, repeated once per _brPDFData row
+  // below) is large enough to explain the render freeze on the Aug 2025 statement.
+  console.log(`[BR-RENDER-DEBUG] matchOptions.length=${matchOptions.length} matchOptHtml.length=${matchOptHtml.length} clientOptHtml.length=${clientOptHtml.length} _brPDFData.length=${_brPDFData.length}`);
+
   const rows = _brPDFData.map((t, i) => {
     const dupBadge = t.isDuplicate ? '<span style="background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.3);padding:1px 5px;border-radius:4px;font-size:10px;">DUP</span>' : '';
     const warnBadge = t._balanceWarning ? '<span style="background:rgba(224,85,85,.15);color:var(--red);border:1px solid rgba(224,85,85,.3);padding:1px 5px;border-radius:4px;font-size:10px;" title="Jumlah tidak tally dengan baki bank — sila semak">⚠ Semak</span>' : '';
