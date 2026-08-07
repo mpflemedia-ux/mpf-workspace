@@ -19492,30 +19492,6 @@ async function brHandlePDFFile(event) {
     document.getElementById('pdfImportBtn').style.display = '';
     document.getElementById('pdfResetBtn').style.display = '';
 
-    // TEMP-DEBUG: on-page trace panel (mobile-friendly — no DevTools/console access needed)
-    if ((window._mbbDebugLines || []).length) {
-      let dbgPanel = document.getElementById('mbbDebugPanel');
-      if (!dbgPanel) {
-        dbgPanel = document.createElement('div');
-        dbgPanel.id = 'mbbDebugPanel';
-        statusEl.insertAdjacentElement('afterend', dbgPanel);
-      }
-      dbgPanel.innerHTML = `
-        <details style="margin-top:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;" open>
-          <summary style="cursor:pointer;font-weight:700;font-size:12px;">🐞 MBB-DEBUG Trace (${(window._mbbDebugLines||[]).length} baris) — tapis & copy</summary>
-          <div style="margin-top:6px;">
-            <div style="display:flex;gap:6px;margin-bottom:6px;">
-              <input id="mbbDebugFilter" type="text" value="1.00" placeholder="Filter (cth: 1.00, SKIP, FOOTER, DATE-LINE)" oninput="_mbbDebugFilter()" style="flex:1;font-size:12px;padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;box-sizing:border-box;">
-              <button type="button" onclick="document.getElementById('mbbDebugFilter').value='';_mbbDebugFilter()" class="btn btn-secondary btn-sm">Semua</button>
-            </div>
-            <div id="mbbDebugCount" style="font-size:10px;color:var(--text2);margin-bottom:4px;"></div>
-            <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('mbbDebugText').value).then(()=>toast('✓ Debug trace (ditapis) disalin'))" class="btn btn-secondary btn-sm" style="margin-bottom:6px;">📋 Copy Yang Ditapis</button>
-            <textarea id="mbbDebugText" readonly style="width:100%;height:300px;font-family:monospace;font-size:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;white-space:pre;box-sizing:border-box;"></textarea>
-          </div>
-        </details>`;
-      _mbbDebugFilter();
-    }
-
   } catch (e) {
     console.error('PDF import error:', e);
     statusEl.style.background = 'rgba(224,85,85,.1)';
@@ -19845,29 +19821,7 @@ function _brParseHLB(lines) {
 // Year extracted from statement header.
 // Verified via balance math from Clore Dec 2025 statement.
 
-// TEMP-DEBUG: logs to console AND collects into window._mbbDebugLines for an on-page panel (mobile-friendly, no DevTools needed).
-function _mbbDebugLog(msg) {
-  console.log(msg);
-  if (!window._mbbDebugLines) window._mbbDebugLines = [];
-  window._mbbDebugLines.push(msg);
-}
-
-// TEMP-DEBUG: filter the on-page trace textarea by a search term (case-insensitive substring).
-function _mbbDebugFilter() {
-  const term = (document.getElementById('mbbDebugFilter')?.value || '').toLowerCase();
-  const lines = window._mbbDebugLines || [];
-  const filtered = term ? lines.filter(l => l.toLowerCase().includes(term)) : lines;
-  const ta = document.getElementById('mbbDebugText');
-  if (ta) ta.value = filtered.join('\n');
-  const cnt = document.getElementById('mbbDebugCount');
-  if (cnt) cnt.textContent = `${filtered.length} / ${lines.length} baris dipaparkan`;
-}
-
 function _brParseMaybank(lines) {
-  // TEMP-DEBUG: dump every raw line fed into the parser, for comparing against the source PDF page-by-page.
-  window._mbbDebugLines = [];
-  _mbbDebugLog(`[MBB-DEBUG] _brParseMaybank called with ${lines.length} raw lines`);
-  lines.forEach((l, i) => _mbbDebugLog(`[MBB-DEBUG] L${i}: ${JSON.stringify(l)}`));
   let stmtYear = new Date().getFullYear();
   const headerBlock = lines.slice(0, 60).join(' ');
   const yr2 = headerBlock.match(/\b(\d{2})\/(\d{2})\/(\d{2})\b/);
@@ -19878,7 +19832,11 @@ function _brParseMaybank(lines) {
   const transactions = [];
   let cur = null;
   const dateRe = /^(\d{2})\/(\d{2})(?:\/\d{2,4})?\s+(.*)/;
-  const amtRe = /([\d,]+\.\d{2})([+-])/;
+  // [\d,]* (not +): PDF text extraction sometimes drops the leading "0" on sub-RM1
+  // amounts (e.g. "0.50+" extracts as ".50+"). parseFloat('.50') already yields 0.5
+  // correctly, so widening the digit group to allow zero leading digits recovers
+  // these without any other change to amount parsing.
+  const amtRe = /([\d,]*\.\d{2})([+-])/;
   const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\))/i;
 
   // Footer block marker — once triggered, ignore all remaining lines
@@ -19891,16 +19849,13 @@ function _brParseMaybank(lines) {
   let inPageHeader = false;
   let inFooter = false;
 
-  lines.forEach((line, _dbgIdx) => {
+  lines.forEach(line => {
     const l = line.trim();
     if (!l) return;
-    // TEMP-DEBUG: flag any line containing "1.00" unconditionally, before any skip logic runs,
-    // so we can see exactly what happens to it even if it gets filtered out below.
-    if (l.includes('1.00')) _mbbDebugLog(`[MBB-DEBUG] *** LINE CONTAINS "1.00" @L${_dbgIdx} inFooter=${inFooter} inPageHeader=${inPageHeader}: ${JSON.stringify(l)}`);
     // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
     if (inFooter) return;
-    if (footerStartRe.test(l)) { _mbbDebugLog(`[MBB-DEBUG] FOOTER-START TRIGGERED @L${_dbgIdx}: ${JSON.stringify(l)}`); inFooter = true; return; }
-    if (skipRe.test(l)) { _mbbDebugLog(`[MBB-DEBUG] SKIP(skipRe) @L${_dbgIdx}: ${JSON.stringify(l)}`); return; }
+    if (footerStartRe.test(l)) { inFooter = true; return; }
+    if (skipRe.test(l)) return;
     if (l.match(/^\d{12,}$/) || l.match(/^\d{9,}[A-Z]$/)) return;
     // Skip page header number e.g. "000001 KARAMUNSING" and enter header-skip mode
     if (l.match(/^\d{6}\s+[A-Z]/)) { inPageHeader = true; return; }
@@ -19916,14 +19871,10 @@ function _brParseMaybank(lines) {
     if (dm) {
       // Guard: skip false date matches like "31/01/25 CLORE HEALTH AND BEAUTY STATEMENT DATE"
       if (/STATEMENT DATE|STATEMENT PERIOD|STATEMENT OF/i.test(dm[3])) return;
-      if (cur) {
-        if (cur.amount > 0 && cur.type) transactions.push(cur);
-        else _mbbDebugLog(`[MBB-DEBUG] DROPPED (incomplete cur, new date line arrived) @L${_dbgIdx}: ${JSON.stringify(cur)}`);
-      }
+      if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
       const [, dd, mm, rest] = dm;
       const date = `${stmtYear}-${mm}-${dd}`;
       const amtMatch = rest.match(amtRe);
-      _mbbDebugLog(`[MBB-DEBUG] DATE-LINE @L${_dbgIdx} rest=${JSON.stringify(rest)} amtMatch=${amtMatch ? JSON.stringify(amtMatch[0]) : 'NULL'}`);
 
       // Trim footer boilerplate from description
       // "= = =" is Maybank's separator between real desc and footer notes
@@ -19947,7 +19898,6 @@ function _brParseMaybank(lines) {
       }
     } else if (cur) {
       const amtMatch = l.match(amtRe);
-      _mbbDebugLog(`[MBB-DEBUG] CONT-LINE @L${_dbgIdx} cur.date=${cur.date} cur._pending=${!!cur._pending} cur.amount=${cur.amount} amtMatch=${amtMatch ? JSON.stringify(amtMatch[0]) : 'NULL'} line=${JSON.stringify(l)}`);
       if (amtMatch && (cur._pending || cur.amount === 0)) {
         cur.amount = parseFloat(amtMatch[1].replace(/,/g, ''));
         cur.type = amtMatch[2] === '+' ? 'In' : 'Out';
@@ -19963,14 +19913,7 @@ function _brParseMaybank(lines) {
     }
   });
 
-  if (cur) {
-    if (cur.amount > 0 && cur.type) transactions.push(cur);
-    else _mbbDebugLog(`[MBB-DEBUG] DROPPED (incomplete cur, end of lines reached): ${JSON.stringify(cur)}`);
-  }
-
-  // TEMP-DEBUG: final extracted count + list, for cross-checking against the 292 rows the UI reported.
-  _mbbDebugLog(`[MBB-DEBUG] TOTAL extracted (pre-filter): ${transactions.length}`);
-  transactions.forEach((t, i) => _mbbDebugLog(`[MBB-DEBUG] TXN${i}: ${t.date} ${t.type} ${t.amount} | ${t.desc}`));
+  if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
 
   return transactions
     .filter(t => t.amount > 0 && t.type)
