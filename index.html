@@ -19493,8 +19493,7 @@ async function brHandlePDFFile(event) {
     document.getElementById('pdfResetBtn').style.display = '';
 
     // TEMP-DEBUG: on-page trace panel (mobile-friendly — no DevTools/console access needed)
-    const dbgLines = (window._mbbDebugLines || []).join('\n');
-    if (dbgLines) {
+    if ((window._mbbDebugLines || []).length) {
       let dbgPanel = document.getElementById('mbbDebugPanel');
       if (!dbgPanel) {
         dbgPanel = document.createElement('div');
@@ -19503,12 +19502,18 @@ async function brHandlePDFFile(event) {
       }
       dbgPanel.innerHTML = `
         <details style="margin-top:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;" open>
-          <summary style="cursor:pointer;font-weight:700;font-size:12px;">🐞 MBB-DEBUG Trace (${(window._mbbDebugLines||[]).length} baris) — tekan untuk copy</summary>
+          <summary style="cursor:pointer;font-weight:700;font-size:12px;">🐞 MBB-DEBUG Trace (${(window._mbbDebugLines||[]).length} baris) — tapis & copy</summary>
           <div style="margin-top:6px;">
-            <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('mbbDebugText').value).then(()=>toast('✓ Debug trace disalin'))" class="btn btn-secondary btn-sm" style="margin-bottom:6px;">📋 Copy Semua</button>
-            <textarea id="mbbDebugText" readonly style="width:100%;height:300px;font-family:monospace;font-size:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;white-space:pre;box-sizing:border-box;">${_brEsc(dbgLines)}</textarea>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <input id="mbbDebugFilter" type="text" value="1.00" placeholder="Filter (cth: 1.00, SKIP, FOOTER, DATE-LINE)" oninput="_mbbDebugFilter()" style="flex:1;font-size:12px;padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;box-sizing:border-box;">
+              <button type="button" onclick="document.getElementById('mbbDebugFilter').value='';_mbbDebugFilter()" class="btn btn-secondary btn-sm">Semua</button>
+            </div>
+            <div id="mbbDebugCount" style="font-size:10px;color:var(--text2);margin-bottom:4px;"></div>
+            <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('mbbDebugText').value).then(()=>toast('✓ Debug trace (ditapis) disalin'))" class="btn btn-secondary btn-sm" style="margin-bottom:6px;">📋 Copy Yang Ditapis</button>
+            <textarea id="mbbDebugText" readonly style="width:100%;height:300px;font-family:monospace;font-size:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;white-space:pre;box-sizing:border-box;"></textarea>
           </div>
         </details>`;
+      _mbbDebugFilter();
     }
 
   } catch (e) {
@@ -19845,6 +19850,17 @@ function _mbbDebugLog(msg) {
   console.log(msg);
   if (!window._mbbDebugLines) window._mbbDebugLines = [];
   window._mbbDebugLines.push(msg);
+}
+
+// TEMP-DEBUG: filter the on-page trace textarea by a search term (case-insensitive substring).
+function _mbbDebugFilter() {
+  const term = (document.getElementById('mbbDebugFilter')?.value || '').toLowerCase();
+  const lines = window._mbbDebugLines || [];
+  const filtered = term ? lines.filter(l => l.toLowerCase().includes(term)) : lines;
+  const ta = document.getElementById('mbbDebugText');
+  if (ta) ta.value = filtered.join('\n');
+  const cnt = document.getElementById('mbbDebugCount');
+  if (cnt) cnt.textContent = `${filtered.length} / ${lines.length} baris dipaparkan`;
 }
 
 function _brParseMaybank(lines) {
