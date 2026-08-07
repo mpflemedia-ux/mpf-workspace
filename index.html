@@ -19822,6 +19822,9 @@ function _brParseHLB(lines) {
 // Verified via balance math from Clore Dec 2025 statement.
 
 function _brParseMaybank(lines) {
+  // TEMP-DEBUG: dump every raw line fed into the parser, for comparing against the source PDF page-by-page.
+  console.log(`[MBB-DEBUG] _brParseMaybank called with ${lines.length} raw lines`);
+  lines.forEach((l, i) => console.log(`[MBB-DEBUG] L${i}: ${JSON.stringify(l)}`));
   let stmtYear = new Date().getFullYear();
   const headerBlock = lines.slice(0, 60).join(' ');
   const yr2 = headerBlock.match(/\b(\d{2})\/(\d{2})\/(\d{2})\b/);
@@ -19845,13 +19848,16 @@ function _brParseMaybank(lines) {
   let inPageHeader = false;
   let inFooter = false;
 
-  lines.forEach(line => {
+  lines.forEach((line, _dbgIdx) => {
     const l = line.trim();
     if (!l) return;
+    // TEMP-DEBUG: flag any line containing "1.00" unconditionally, before any skip logic runs,
+    // so we can see exactly what happens to it even if it gets filtered out below.
+    if (l.includes('1.00')) console.log(`[MBB-DEBUG] *** LINE CONTAINS "1.00" @L${_dbgIdx} inFooter=${inFooter} inPageHeader=${inPageHeader}: ${JSON.stringify(l)}`);
     // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
     if (inFooter) return;
-    if (footerStartRe.test(l)) { inFooter = true; return; }
-    if (skipRe.test(l)) return;
+    if (footerStartRe.test(l)) { console.log(`[MBB-DEBUG] FOOTER-START TRIGGERED @L${_dbgIdx}: ${JSON.stringify(l)}`); inFooter = true; return; }
+    if (skipRe.test(l)) { console.log(`[MBB-DEBUG] SKIP(skipRe) @L${_dbgIdx}: ${JSON.stringify(l)}`); return; }
     if (l.match(/^\d{12,}$/) || l.match(/^\d{9,}[A-Z]$/)) return;
     // Skip page header number e.g. "000001 KARAMUNSING" and enter header-skip mode
     if (l.match(/^\d{6}\s+[A-Z]/)) { inPageHeader = true; return; }
@@ -19867,10 +19873,14 @@ function _brParseMaybank(lines) {
     if (dm) {
       // Guard: skip false date matches like "31/01/25 CLORE HEALTH AND BEAUTY STATEMENT DATE"
       if (/STATEMENT DATE|STATEMENT PERIOD|STATEMENT OF/i.test(dm[3])) return;
-      if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
+      if (cur) {
+        if (cur.amount > 0 && cur.type) transactions.push(cur);
+        else console.log(`[MBB-DEBUG] DROPPED (incomplete cur, new date line arrived) @L${_dbgIdx}: ${JSON.stringify(cur)}`);
+      }
       const [, dd, mm, rest] = dm;
       const date = `${stmtYear}-${mm}-${dd}`;
       const amtMatch = rest.match(amtRe);
+      console.log(`[MBB-DEBUG] DATE-LINE @L${_dbgIdx} rest=${JSON.stringify(rest)} amtMatch=${amtMatch ? JSON.stringify(amtMatch[0]) : 'NULL'}`);
 
       // Trim footer boilerplate from description
       // "= = =" is Maybank's separator between real desc and footer notes
@@ -19894,6 +19904,7 @@ function _brParseMaybank(lines) {
       }
     } else if (cur) {
       const amtMatch = l.match(amtRe);
+      console.log(`[MBB-DEBUG] CONT-LINE @L${_dbgIdx} cur.date=${cur.date} cur._pending=${!!cur._pending} cur.amount=${cur.amount} amtMatch=${amtMatch ? JSON.stringify(amtMatch[0]) : 'NULL'} line=${JSON.stringify(l)}`);
       if (amtMatch && (cur._pending || cur.amount === 0)) {
         cur.amount = parseFloat(amtMatch[1].replace(/,/g, ''));
         cur.type = amtMatch[2] === '+' ? 'In' : 'Out';
@@ -19909,7 +19920,14 @@ function _brParseMaybank(lines) {
     }
   });
 
-  if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
+  if (cur) {
+    if (cur.amount > 0 && cur.type) transactions.push(cur);
+    else console.log(`[MBB-DEBUG] DROPPED (incomplete cur, end of lines reached): ${JSON.stringify(cur)}`);
+  }
+
+  // TEMP-DEBUG: final extracted count + list, for cross-checking against the 292 rows the UI reported.
+  console.log(`[MBB-DEBUG] TOTAL extracted (pre-filter): ${transactions.length}`);
+  transactions.forEach((t, i) => console.log(`[MBB-DEBUG] TXN${i}: ${t.date} ${t.type} ${t.amount} | ${t.desc}`));
 
   return transactions
     .filter(t => t.amount > 0 && t.type)
