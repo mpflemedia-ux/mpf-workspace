@@ -19431,10 +19431,23 @@ async function brHandlePDFFile(event) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
 
+    // Large statements (many pages) can take a while to extract — warn instead of
+    // silently freezing the tab with no feedback. User can still choose to proceed.
+    const PDF_PAGE_WARN_THRESHOLD = 40;
+    if (pdf.numPages > PDF_PAGE_WARN_THRESHOLD) {
+      const proceed = confirm(`⚠ PDF ni ada ${pdf.numPages} muka surat — extraction mungkin ambil masa dan browser boleh nampak "tak respond" sekejap (normal untuk statement besar).\n\nTeruskan?`);
+      if (!proceed) {
+        statusEl.style.display = 'none';
+        event.target.value = '';
+        return;
+      }
+    }
+
     // Position-aware line extraction — group text items by y-coordinate
     // (preserves column order: date | desc | amount | balance)
     let allLines = [];
     for (let i = 1; i <= pdf.numPages; i++) {
+      statusEl.innerHTML = `⏳ Mengekstrak teks dari PDF... (muka surat ${i}/${pdf.numPages})`;
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const lineMap = {};
@@ -19449,6 +19462,9 @@ async function brHandlePDFFile(event) {
         .map(y => lineMap[y].sort((a, b) => a.x - b.x).map(i => i.str).join(' '))
         .filter(l => l.trim());
       allLines = allLines.concat(pageLines);
+      // Yield to the browser between pages so a long extraction doesn't trip Chrome's
+      // main-thread hang detector ("Page Unresponsive") on statements with many pages.
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
     const fullText = allLines.join('\n');
 
