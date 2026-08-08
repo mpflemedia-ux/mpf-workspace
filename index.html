@@ -19883,6 +19883,12 @@ function _brParseMaybank(lines) {
   lines.forEach(line => {
     const l = _brFixLeadingZero(line.trim());
     if (!l) return;
+    // TEMP-DEBUG: trace lines/cur-state around the "REV" reversal transactions (CB FROZEN
+    // FOOD, RM324.85/RM948.85) to find why they double-count Total IN and Total OUT by the
+    // same amount on the Sep 2025 statement.
+    if (/REV|CB FROZEN|324\.85|948\.85/i.test(l)) {
+      console.log(`[REV-DEBUG] RAW LINE: ${JSON.stringify(l)} | cur=${cur ? JSON.stringify({date:cur.date,amount:cur.amount,type:cur.type,pending:!!cur._pending,desc:cur.desc}) : 'null'}`);
+    }
     // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
     if (inFooter) return;
     if (footerStartRe.test(l)) { inFooter = true; return; }
@@ -19902,7 +19908,12 @@ function _brParseMaybank(lines) {
     if (dm) {
       // Guard: skip false date matches like "31/01/25 CLORE HEALTH AND BEAUTY STATEMENT DATE"
       if (/STATEMENT DATE|STATEMENT PERIOD|STATEMENT OF/i.test(dm[3])) return;
-      if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
+      if (cur && cur.amount > 0 && cur.type) {
+        if (/REV|CB FROZEN/i.test(cur.desc||'') || Math.abs(cur.amount-324.85)<0.01 || Math.abs(cur.amount-948.85)<0.01) {
+          console.log(`[REV-DEBUG] PUSH(new-date-line arrived) date=${cur.date} amount=${cur.amount} type=${cur.type} desc=${JSON.stringify(cur.desc)}`);
+        }
+        transactions.push(cur);
+      }
       const [, dd, mm, rest] = dm;
       const date = `${stmtYear}-${mm}-${dd}`;
       const amtMatch = rest.match(amtRe);
@@ -19924,12 +19935,21 @@ function _brParseMaybank(lines) {
         const afterAmt = rest.slice(rest.indexOf(amtMatch[0]) + amtMatch[0].length);
         const balNums = _brExtractNums(afterAmt);
         cur = { date, desc: descRaw, type, amount, _balance: balNums[0] || null };
+        if (/REV|CB FROZEN/i.test(descRaw) || Math.abs(amount-324.85)<0.01 || Math.abs(amount-948.85)<0.01) {
+          console.log(`[REV-DEBUG] NEW cur (inline amount) date=${date} amount=${amount} type=${type} desc=${JSON.stringify(descRaw)}`);
+        }
       } else {
         cur = { date, desc: trimDesc(rest.trim()), type: null, amount: 0, _pending: true, _balance: null };
+        if (/REV|CB FROZEN/i.test(cur.desc)) {
+          console.log(`[REV-DEBUG] NEW cur (PENDING, no inline amount) date=${date} desc=${JSON.stringify(cur.desc)}`);
+        }
       }
     } else if (cur) {
       const amtMatch = l.match(amtRe);
       if (amtMatch && (cur._pending || cur.amount === 0)) {
+        if (/REV|CB FROZEN/i.test(cur.desc||'')) {
+          console.log(`[REV-DEBUG] CONT-LINE resolves pending amount: date=${cur.date} desc=${JSON.stringify(cur.desc)} matchedAmount=${amtMatch[0]} fromLine=${JSON.stringify(l)}`);
+        }
         cur.amount = parseFloat(amtMatch[1].replace(/,/g, ''));
         cur.type = amtMatch[2] === '+' ? 'In' : 'Out';
         const afterAmt = l.slice(l.indexOf(amtMatch[0]) + amtMatch[0].length);
@@ -19938,15 +19958,23 @@ function _brParseMaybank(lines) {
         delete cur._pending;
       } else if (!cur._pending) {
         if (!l.match(/^[A-Z0-9]{12,}$/) && !l.match(/^\d{10,}/) && !footerContentRe.test(l)) {
+          if (/REV|CB FROZEN/i.test(l) || /REV|CB FROZEN/i.test(cur.desc||'')) {
+            console.log(`[REV-DEBUG] APPEND to desc: date=${cur.date} amount=${cur.amount} pending=${!!cur._pending} appending=${JSON.stringify(l)} descBefore=${JSON.stringify(cur.desc)}`);
+          }
           cur.desc += ' ' + l;
         }
       }
     }
   });
 
-  if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
+  if (cur && cur.amount > 0 && cur.type) {
+    if (/REV|CB FROZEN/i.test(cur.desc||'') || Math.abs(cur.amount-324.85)<0.01 || Math.abs(cur.amount-948.85)<0.01) {
+      console.log(`[REV-DEBUG] PUSH(end of lines) date=${cur.date} amount=${cur.amount} type=${cur.type} desc=${JSON.stringify(cur.desc)}`);
+    }
+    transactions.push(cur);
+  }
 
-  return transactions
+  const result = transactions
     .filter(t => t.amount > 0 && t.type)
     .map(t => {
       let d = t.desc.replace(/\s+/g, ' ').trim();
@@ -19964,6 +19992,14 @@ function _brParseMaybank(lines) {
         ref: ''
       };
     });
+
+  // TEMP-DEBUG: final summary of every REV/CB FROZEN transaction that survived to the
+  // returned result — count + list, to see duplicates at a glance.
+  const revFinal = result.filter(t => /REV|CB FROZEN/i.test(t.desc) || Math.abs(t.amount-324.85)<0.01 || Math.abs(t.amount-948.85)<0.01);
+  console.log(`[REV-DEBUG] FINAL COUNT: ${revFinal.length} REV/CB FROZEN transactions in result`);
+  revFinal.forEach((t,i) => console.log(`[REV-DEBUG] FINAL[${i}] date=${t.date} type=${t.type} amount=${t.amount} desc=${JSON.stringify(t.desc)}`));
+
+  return result;
 }
 
 // ── Balance Verifier ──────────────────────────────────────────────────────────
