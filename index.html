@@ -14265,20 +14265,22 @@ function reCatSelectAll() {
 
 function reCatApply() {
   let count = 0;
-  const data = JSON.parse(localStorage.getItem('mpfWorkSpace') || '{}');
+  let checked = 0;
+  let notFound = 0;
 
   _reCatResults.forEach((r, i) => {
     const chk = document.getElementById(`reCatChk${i}`);
     if (!chk || !chk.checked) return;
+    checked++;
 
-    // Find the profile
-    const profiles = data.profiles || [];
-    const prof = profiles.find(p => String(p.id) === String(r.profId));
-    if (!prof || !prof.bk?.txns) return;
+    // Same source as reCatScan (APP.profiles), not a separate localStorage re-parse —
+    // avoids missing in-memory changes that haven't been persisted yet.
+    const prof = (APP.profiles || []).find(p => String(p.id) === String(r.profId));
+    if (!prof || !prof.bk?.txns) { notFound++; return; }
 
     // Find transaction — use String() comparison per master prompt
     const tx = prof.bk.txns.find(t => String(t.id) === String(r.txnId));
-    if (!tx) return;
+    if (!tx) { notFound++; return; }
 
     tx.category = r.suggestedCat;
     tx.cat = r.suggestedCat;
@@ -14286,13 +14288,14 @@ function reCatApply() {
   });
 
   if (count > 0) {
-    localStorage.setItem('mpfWorkSpace', JSON.stringify(data));
-    // Reload APP data
-    if (typeof loadData === 'function') loadData();
+    if (typeof save === 'function') save();
     toast(`✓ ${count} transaksi dikemaskini`, 'success');
     closeModal('reCatModal');
     // Refresh current page
     if (typeof bkRenderRpts === 'function') bkRenderRpts();
+    if (typeof loadData === 'function') loadData();
+  } else if (checked > 0 && notFound > 0) {
+    toast(`Transaksi dipilih tapi tak jumpa dalam data (${notFound}). Cuba refresh page.`, 'error');
   } else {
     toast('Tiada transaksi dipilih', 'error');
   }
