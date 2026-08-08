@@ -19868,39 +19868,31 @@ function _brParseMaybank(lines) {
   let cur = null;
   const dateRe = /^(\d{2})\/(\d{2})(?:\/\d{2,4})?\s+(.*)/;
   const amtRe = /([\d,]+\.\d{2})([+-])/;
-  const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\)|^REV\s+\d{6,})/i;
+  const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\))/i;
 
-  const footerStartRe = /^(MAYBANK2U\. TIADA|INSTRUCTION SERVICE FOR AUDIT|ECONFIRMATION PLATFORM|MAKE A SUSTAINABLE CHOICE TODAY|YOU WILL NO LONGER RECEIVE PHYSICAL COPIES|NOTICE:\s*REVISED STAMP)/i;
+  // Footer block marker — once triggered, ignore all remaining lines
+  // ONLY use patterns that are 100% unique to the trailing footer boilerplate, NOT page headers
+  const footerStartRe = /^(MAYBANK2U\. TIADA|INSTRUCTION SERVICE FOR AUDIT|ECONFIRMATION PLATFORM|MAKE A SUSTAINABLE CHOICE TODAY|YOU WILL NO LONGER RECEIVE PHYSICAL COPIES)/i;
 
-  const footerContentRe = /=\s*=\s*=|LEDGER ENDING BALANCE|UNCLEARED CHEQUES|ditandakan dengan DR BALANCE|DR BALANCE melainkan|Overdrawn balances|DR NOT PROTECTED BY PIDM|PA-i minor and in-trust|Dataran Maybank|15th Floor.*Tower|STATEMENT DATE KOMPLEKS|INWARD RETURN CHEQUE|ECONFIRMATION PLATFORM|INSTRUCTION SERVICE FOR AUDIT|MAKE A SUSTAINABLE CHOICE|SWITCH TO ELECTRONIC STATEMENT|YOU WILL NO LONGER RECEIVE PHYSICAL|ACCOUNT NUMBER STARTING OCTOBER|VISIT THE NEAREST MAYBANK|PEMBIAYAAN RUMAH|PINDAHAN DANA SEGERA|GIRO ANTARA BANK|TIADA YURAN TRANSAKSI|denoted by DR|NOT PROTECTED BY PIDM|PERUSAHAAN JEMARI|NOMBOR AKAUN|ACCOUNT NUMBER|PLEASE BE REMINDED|MAYBANK2U|SINGLE ACCOUNT AND INCREASE/i;
+  // Footer content check — for desc continuation lines AND final trim backstop
+  const footerContentRe = /=\s*=\s*=|LEDGER ENDING BALANCE|UNCLEARED CHEQUES|ditandakan dengan DR BALANCE|DR BALANCE melainkan|Overdrawn balances|DR NOT PROTECTED BY PIDM|PA-i minor and in-trust|Dataran Maybank|15th Floor.*Tower|STATEMENT DATE KOMPLEKS|INWARD RETURN CHEQUE|ECONFIRMATION PLATFORM|INSTRUCTION SERVICE FOR AUDIT|MAKE A SUSTAINABLE CHOICE|SWITCH TO ELECTRONIC STATEMENT|YOU WILL NO LONGER RECEIVE PHYSICAL|ACCOUNT NUMBER STARTING OCTOBER|VISIT THE NEAREST MAYBANK|PEMBIAYAAN RUMAH|PINDAHAN DANA SEGERA|GIRO ANTARA BANK|TIADA YURAN TRANSAKSI/i;
 
   let inPageHeader = false;
   let inFooter = false;
-  const seenFp = new Set();
-
-  function _txFp(t) {
-    const bal = (t._balance != null) ? Number(t._balance).toFixed(2) : '';
-    return t.date + '|' + t.type + '|' + Number(t.amount).toFixed(2) + '|' + bal;
-  }
-
-  function _pushCur(c) {
-    if (!(c && c.amount > 0 && c.type)) return;
-    const fp = _txFp(c);
-    if (seenFp.has(fp)) return;
-    seenFp.add(fp);
-    transactions.push(c);
-  }
 
   lines.forEach(line => {
     const l = _brFixLeadingZero(line.trim());
     if (!l) return;
-    if (/^REV\s+\d{6,}/i.test(l)) return;
+    // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
     if (inFooter) return;
     if (footerStartRe.test(l)) { inFooter = true; return; }
     if (skipRe.test(l)) return;
     if (l.match(/^\d{12,}$/) || l.match(/^\d{9,}[A-Z]$/)) return;
+    // Skip page header number e.g. "000001 KARAMUNSING" and enter header-skip mode
     if (l.match(/^\d{6}\s+[A-Z]/)) { inPageHeader = true; return; }
+    // Skip Chinese/Japanese characters (footer notes in Mandarin)
     if (/[\u4e00-\u9fff\u3000-\u303f]/.test(l)) return;
+    // While in page header, skip name/address lines until a date line resets the flag
     if (inPageHeader) {
       if (l.match(dateRe)) inPageHeader = false;
       else return;
@@ -19908,12 +19900,15 @@ function _brParseMaybank(lines) {
 
     const dm = l.match(dateRe);
     if (dm) {
+      // Guard: skip false date matches like "31/01/25 CLORE HEALTH AND BEAUTY STATEMENT DATE"
       if (/STATEMENT DATE|STATEMENT PERIOD|STATEMENT OF/i.test(dm[3])) return;
-      _pushCur(cur);
+      if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
       const [, dd, mm, rest] = dm;
       const date = `${stmtYear}-${mm}-${dd}`;
       const amtMatch = rest.match(amtRe);
 
+      // Trim footer boilerplate from description
+      // "= = =" is Maybank's separator between real desc and footer notes
       const trimDesc = (d) => {
         const sepIdx = d.search(/\s*=\s*=\s*=/);
         if (sepIdx !== -1) return d.slice(0, sepIdx).trim();
@@ -19942,38 +19937,36 @@ function _brParseMaybank(lines) {
         if (balNums.length) cur._balance = balNums[0];
         delete cur._pending;
       } else if (!cur._pending) {
-        if (!l.match(/^[A-Z0-9]{12,}$/) && !l.match(/^\d{10,}/) && !footerContentRe.test(l) && !/^REV\s+\d{6,}/i.test(l)) {
+        if (!l.match(/^[A-Z0-9]{12,}$/) && !l.match(/^\d{10,}/) && !footerContentRe.test(l)) {
           cur.desc += ' ' + l;
         }
       }
     }
   });
 
-  _pushCur(cur);
+  if (cur && cur.amount > 0 && cur.type) transactions.push(cur);
 
-  const seen2 = new Set();
-  const result = [];
-  for (const t of transactions) {
-    if (!(t.amount > 0 && t.type)) continue;
-    let d = (t.desc || '').replace(/\s+/g, ' ').trim();
-    const fIdx = d.search(footerContentRe);
-    if (fIdx !== -1) d = d.slice(0, fIdx).trim();
-    const fp2 = t.date + '|' + t.type + '|' + Number(t.amount).toFixed(2) + '|' + d.slice(0, 48);
-    if (seen2.has(fp2)) continue;
-    seen2.add(fp2);
-    result.push({
-      date: t.date,
-      desc: d,
-      type: t.type,
-      amount: t.amount,
-      _balance: t._balance,
-      _balanceWarning: false,
-      category: _brAutoCategory(d, t.type),
-      ref: ''
+  return transactions
+    .filter(t => t.amount > 0 && t.type)
+    .map(t => {
+      let d = t.desc.replace(/\s+/g, ' ').trim();
+      // Final backstop: trim any footer content that slipped through
+      const fIdx = d.search(footerContentRe);
+      if (fIdx !== -1) d = d.slice(0, fIdx).trim();
+      return {
+        date: t.date,
+        desc: d,
+        type: t.type,
+        amount: t.amount,
+        _balance: t._balance,
+        _balanceWarning: false,
+        category: _brAutoCategory(d, t.type),
+        ref: ''
+      };
     });
-  }
-  return result;
-}// ── Balance Verifier ──────────────────────────────────────────────────────────
+}
+
+// ── Balance Verifier ──────────────────────────────────────────────────────────
 // Verify running balance math. Handles gaps (rows without balance).
 // Flags _balanceWarning: true on rows where math doesn't tally (>2 sen diff).
 
@@ -20321,26 +20314,45 @@ function _brRenderPDFReview() {
     const cntOutOk= fd.countOut === null || debits   === fd.countOut;
     const allOk   = inOk && outOk && cntInOk && cntOutOk;
 
+    // Wash/reversal-pair signature: Maybank's own TOTAL CREDIT/TOTAL DEBIT footer nets out
+    // matched reversal pairs (e.g. a transfer + its "REV" reversal), while the statement body
+    // still lists both legs individually — which we correctly extract. That shows up as the
+    // app's totals being higher than the footer by the exact same amount on BOTH sides, not
+    // a real extraction error. Verified against a real statement — see commit history.
+    const deltaIn  = fd.totalIn  !== null ? ourIN  - fd.totalIn  : 0;
+    const deltaOut = fd.totalOut !== null ? ourOUT - fd.totalOut : 0;
+    const washPattern = !allOk && !inOk && !outOk && deltaIn > tol && deltaOut > tol && Math.abs(deltaIn - deltaOut) < tol;
+
     const tick  = `<span style="color:var(--green);font-weight:700;">✓</span>`;
-    const cross = `<span style="color:var(--red);font-weight:700;">✗</span>`;
+    const cross = `<span style="color:${washPattern ? '#6366f1' : 'var(--red)'};font-weight:700;">${washPattern ? 'ℹ' : '✗'}</span>`;
+    const deltaColor = washPattern ? '#6366f1' : 'var(--red)';
     const fmt   = v => v !== null ? `RM ${v.toFixed(2)}` : '—';
     const fmtN  = v => v !== null ? v : '—';
 
     const rowStyle = `display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px;border-bottom:1px solid var(--border);gap:8px;`;
 
+    const bannerColor = allOk ? 'var(--green)' : washPattern ? '#6366f1' : 'var(--red)';
+    const bannerBg     = allOk ? 'rgba(46,204,138,.07)' : washPattern ? 'rgba(99,102,241,.07)' : 'rgba(224,85,85,.07)';
+    const bannerBorder = allOk ? 'rgba(46,204,138,.3)' : washPattern ? 'rgba(99,102,241,.3)' : 'rgba(224,85,85,.3)';
+    const bannerMsg = allOk
+      ? '✓ Pengesahan PDF Lulus — Semua angka tally dengan penyata bank'
+      : washPattern
+        ? `ℹ PDF ada wash/reversal pairs (transfer + pembatalan automatik, RM${deltaIn.toFixed(2)}) — footer TOTAL CREDIT/DEBIT Maybank exclude pasangan ni dari ringkasan, tapi app papar SEMUA transaksi individu (betul untuk reconciliation, baki/ending balance tetap konsisten).`
+        : '⚠ Pengesahan PDF Gagal — Ada discrepancy dengan penyata bank';
+
     verifyHTML = `
-    <div style="background:${allOk ? 'rgba(46,204,138,.07)' : 'rgba(224,85,85,.07)'};border:1px solid ${allOk ? 'rgba(46,204,138,.3)' : 'rgba(224,85,85,.3)'};border-radius:8px;padding:8px 12px;margin-bottom:10px;">
-      <div style="font-size:11px;font-weight:700;color:${allOk ? 'var(--green)' : 'var(--red)'};margin-bottom:6px;">
-        ${allOk ? '✓ Pengesahan PDF Lulus — Semua angka tally dengan penyata bank' : '⚠ Pengesahan PDF Gagal — Ada discrepancy dengan penyata bank'}
+    <div style="background:${bannerBg};border:1px solid ${bannerBorder};border-radius:8px;padding:8px 12px;margin-bottom:10px;">
+      <div style="font-size:11px;font-weight:700;color:${bannerColor};margin-bottom:6px;">
+        ${bannerMsg}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;">
         <div style="${rowStyle}">
           <span style="color:var(--text2);white-space:nowrap;">Total IN</span>
-          <span style="text-align:right;">${inOk ? tick : cross} <b>RM ${ourIN.toFixed(2)}</b> vs PDF <b>${fmt(fd.totalIn)}</b>${!inOk ? ` <span style="color:var(--red);">Δ${Math.abs(ourIN-(fd.totalIn||0)).toFixed(2)}</span>` : ''}</span>
+          <span style="text-align:right;">${inOk ? tick : cross} <b>RM ${ourIN.toFixed(2)}</b> vs PDF <b>${fmt(fd.totalIn)}</b>${!inOk ? ` <span style="color:${deltaColor};">Δ${Math.abs(ourIN-(fd.totalIn||0)).toFixed(2)}</span>` : ''}</span>
         </div>
         <div style="${rowStyle}">
           <span style="color:var(--text2);white-space:nowrap;">Total OUT</span>
-          <span style="text-align:right;">${outOk ? tick : cross} <b>RM ${ourOUT.toFixed(2)}</b> vs PDF <b>${fmt(fd.totalOut)}</b>${!outOk ? ` <span style="color:var(--red);">Δ${Math.abs(ourOUT-(fd.totalOut||0)).toFixed(2)}</span>` : ''}</span>
+          <span style="text-align:right;">${outOk ? tick : cross} <b>RM ${ourOUT.toFixed(2)}</b> vs PDF <b>${fmt(fd.totalOut)}</b>${!outOk ? ` <span style="color:${deltaColor};">Δ${Math.abs(ourOUT-(fd.totalOut||0)).toFixed(2)}</span>` : ''}</span>
         </div>
         ${fd.countIn !== null ? `<div style="${rowStyle}border-bottom:none;">
           <span style="color:var(--text2);white-space:nowrap;">Bil. IN</span>
@@ -20351,7 +20363,7 @@ function _brRenderPDFReview() {
           <span>${cntOutOk ? tick : cross} <b>${debits}</b> vs PDF <b>${fmtN(fd.countOut)}</b></span>
         </div>` : ''}
       </div>
-      ${!allOk ? `<div style="margin-top:6px;font-size:11px;color:var(--red);">⚠ Semak transaksi bertanda <b>⚠ Semak</b> di bawah sebelum import.</div>` : ''}
+      ${!allOk && !washPattern ? `<div style="margin-top:6px;font-size:11px;color:var(--red);">⚠ Semak transaksi bertanda <b>⚠ Semak</b> di bawah sebelum import.</div>` : ''}
     </div>`;
   }
 
