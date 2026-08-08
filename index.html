@@ -19868,37 +19868,39 @@ function _brParseMaybank(lines) {
   let cur = null;
   const dateRe = /^(\d{2})\/(\d{2})(?:\/\d{2,4})?\s+(.*)/;
   const amtRe = /([\d,]+\.\d{2})([+-])/;
-  const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\))/i;
+  const skipRe = /^(Maybank|Malayan Banking|MUKA\/|TARIKH PENYATA|NOMBOR AKAUN|PROTECTED BY PIDM|BAKI LEGAR|LEDGER BALANCE|LEDGER ENDING BALANCE|ENDING BALANCE|TOTAL DEBIT|TOTAL CREDIT|PROFIT OUTSTANDING|Wang yang|Perhatian|Perhation|Please notify|All items|BEGINNING BALANCE|IBS |FCN$|EXCHANGE YOUR|NOTE:|CREDIT TO MULTIPLE|KINI,|EFFECTIVE|BERMULA|NOTICE:|WE WOULD|KINDLY|FOR ANY|PLEASE REFER|THANK YOU|STARTING 4TH|URUSNIAGA AKAUN|TARIKH MASUK|BUTIR URUSNIAGA|JUMLAH URUSNIAGA|BAKI PENYATA|ENTRY DATE|TRANSACTION DESCRIPTION|TRANSACTION AMOUNT|STATEMENT BALANCE|Semua maklumat|Sila beritahu|14th Floor|15th Floor|Menara Maybank|Dataran Maybank|STATEMENT DATE|KOMPLEKS PENJARA|INWARD RETURN CHEQUE|UNCLEARED CHEQUES|DR NOT PROTECTED|DR BALANCE melainkan|Overdrawn balances|PA-i minor|notified in writing of any|SWITCH TO ELECTRONIC STATEMENT|ACCOUNT NUMBER STARTING|\(1\)|\(2\)|^REV\s+\d{6,})/i;
 
-  // Footer block marker — once triggered, ignore all remaining lines
-  // ONLY use patterns that are 100% unique to the trailing footer boilerplate, NOT page headers
-  const footerStartRe = /^(MAYBANK2U\. TIADA|INSTRUCTION SERVICE FOR AUDIT|ECONFIRMATION PLATFORM|MAKE A SUSTAINABLE CHOICE TODAY|YOU WILL NO LONGER RECEIVE PHYSICAL COPIES)/i;
+  const footerStartRe = /^(MAYBANK2U\. TIADA|INSTRUCTION SERVICE FOR AUDIT|ECONFIRMATION PLATFORM|MAKE A SUSTAINABLE CHOICE TODAY|YOU WILL NO LONGER RECEIVE PHYSICAL COPIES|NOTICE:\s*REVISED STAMP)/i;
 
-  // Footer content check — for desc continuation lines AND final trim backstop
-  const footerContentRe = /=\s*=\s*=|LEDGER ENDING BALANCE|UNCLEARED CHEQUES|ditandakan dengan DR BALANCE|DR BALANCE melainkan|Overdrawn balances|DR NOT PROTECTED BY PIDM|PA-i minor and in-trust|Dataran Maybank|15th Floor.*Tower|STATEMENT DATE KOMPLEKS|INWARD RETURN CHEQUE|ECONFIRMATION PLATFORM|INSTRUCTION SERVICE FOR AUDIT|MAKE A SUSTAINABLE CHOICE|SWITCH TO ELECTRONIC STATEMENT|YOU WILL NO LONGER RECEIVE PHYSICAL|ACCOUNT NUMBER STARTING OCTOBER|VISIT THE NEAREST MAYBANK|PEMBIAYAAN RUMAH|PINDAHAN DANA SEGERA|GIRO ANTARA BANK|TIADA YURAN TRANSAKSI/i;
+  const footerContentRe = /=\s*=\s*=|LEDGER ENDING BALANCE|UNCLEARED CHEQUES|ditandakan dengan DR BALANCE|DR BALANCE melainkan|Overdrawn balances|DR NOT PROTECTED BY PIDM|PA-i minor and in-trust|Dataran Maybank|15th Floor.*Tower|STATEMENT DATE KOMPLEKS|INWARD RETURN CHEQUE|ECONFIRMATION PLATFORM|INSTRUCTION SERVICE FOR AUDIT|MAKE A SUSTAINABLE CHOICE|SWITCH TO ELECTRONIC STATEMENT|YOU WILL NO LONGER RECEIVE PHYSICAL|ACCOUNT NUMBER STARTING OCTOBER|VISIT THE NEAREST MAYBANK|PEMBIAYAAN RUMAH|PINDAHAN DANA SEGERA|GIRO ANTARA BANK|TIADA YURAN TRANSAKSI|denoted by DR|NOT PROTECTED BY PIDM|PERUSAHAAN JEMARI|NOMBOR AKAUN|ACCOUNT NUMBER|PLEASE BE REMINDED|MAYBANK2U|SINGLE ACCOUNT AND INCREASE/i;
 
   let inPageHeader = false;
   let inFooter = false;
+  const seenFp = new Set();
+
+  function _txFp(t) {
+    const bal = (t._balance != null) ? Number(t._balance).toFixed(2) : '';
+    return t.date + '|' + t.type + '|' + Number(t.amount).toFixed(2) + '|' + bal;
+  }
+
+  function _pushCur(c) {
+    if (!(c && c.amount > 0 && c.type)) return;
+    const fp = _txFp(c);
+    if (seenFp.has(fp)) return;
+    seenFp.add(fp);
+    transactions.push(c);
+  }
 
   lines.forEach(line => {
     const l = _brFixLeadingZero(line.trim());
     if (!l) return;
-    // TEMP-DEBUG: trace lines/cur-state around the "REV" reversal transactions (CB FROZEN
-    // FOOD, RM324.85/RM948.85) to find why they double-count Total IN and Total OUT by the
-    // same amount on the Sep 2025 statement.
-    if (/REV|CB FROZEN|324\.85|948\.85/i.test(l)) {
-      console.log(`[REV-DEBUG] RAW LINE: ${JSON.stringify(l)} | cur=${cur ? JSON.stringify({date:cur.date,amount:cur.amount,type:cur.type,pending:!!cur._pending,desc:cur.desc}) : 'null'}`);
-    }
-    // Hard footer block — these patterns ONLY appear in Maybank trailing boilerplate
+    if (/^REV\s+\d{6,}/i.test(l)) return;
     if (inFooter) return;
     if (footerStartRe.test(l)) { inFooter = true; return; }
     if (skipRe.test(l)) return;
     if (l.match(/^\d{12,}$/) || l.match(/^\d{9,}[A-Z]$/)) return;
-    // Skip page header number e.g. "000001 KARAMUNSING" and enter header-skip mode
     if (l.match(/^\d{6}\s+[A-Z]/)) { inPageHeader = true; return; }
-    // Skip Chinese/Japanese characters (footer notes in Mandarin)
     if (/[\u4e00-\u9fff\u3000-\u303f]/.test(l)) return;
-    // While in page header, skip name/address lines until a date line resets the flag
     if (inPageHeader) {
       if (l.match(dateRe)) inPageHeader = false;
       else return;
@@ -19906,20 +19908,12 @@ function _brParseMaybank(lines) {
 
     const dm = l.match(dateRe);
     if (dm) {
-      // Guard: skip false date matches like "31/01/25 CLORE HEALTH AND BEAUTY STATEMENT DATE"
       if (/STATEMENT DATE|STATEMENT PERIOD|STATEMENT OF/i.test(dm[3])) return;
-      if (cur && cur.amount > 0 && cur.type) {
-        if (/REV|CB FROZEN/i.test(cur.desc||'') || Math.abs(cur.amount-324.85)<0.01 || Math.abs(cur.amount-948.85)<0.01) {
-          console.log(`[REV-DEBUG] PUSH(new-date-line arrived) date=${cur.date} amount=${cur.amount} type=${cur.type} desc=${JSON.stringify(cur.desc)}`);
-        }
-        transactions.push(cur);
-      }
+      _pushCur(cur);
       const [, dd, mm, rest] = dm;
       const date = `${stmtYear}-${mm}-${dd}`;
       const amtMatch = rest.match(amtRe);
 
-      // Trim footer boilerplate from description
-      // "= = =" is Maybank's separator between real desc and footer notes
       const trimDesc = (d) => {
         const sepIdx = d.search(/\s*=\s*=\s*=/);
         if (sepIdx !== -1) return d.slice(0, sepIdx).trim();
@@ -19935,21 +19929,12 @@ function _brParseMaybank(lines) {
         const afterAmt = rest.slice(rest.indexOf(amtMatch[0]) + amtMatch[0].length);
         const balNums = _brExtractNums(afterAmt);
         cur = { date, desc: descRaw, type, amount, _balance: balNums[0] || null };
-        if (/REV|CB FROZEN/i.test(descRaw) || Math.abs(amount-324.85)<0.01 || Math.abs(amount-948.85)<0.01) {
-          console.log(`[REV-DEBUG] NEW cur (inline amount) date=${date} amount=${amount} type=${type} desc=${JSON.stringify(descRaw)}`);
-        }
       } else {
         cur = { date, desc: trimDesc(rest.trim()), type: null, amount: 0, _pending: true, _balance: null };
-        if (/REV|CB FROZEN/i.test(cur.desc)) {
-          console.log(`[REV-DEBUG] NEW cur (PENDING, no inline amount) date=${date} desc=${JSON.stringify(cur.desc)}`);
-        }
       }
     } else if (cur) {
       const amtMatch = l.match(amtRe);
       if (amtMatch && (cur._pending || cur.amount === 0)) {
-        if (/REV|CB FROZEN/i.test(cur.desc||'')) {
-          console.log(`[REV-DEBUG] CONT-LINE resolves pending amount: date=${cur.date} desc=${JSON.stringify(cur.desc)} matchedAmount=${amtMatch[0]} fromLine=${JSON.stringify(l)}`);
-        }
         cur.amount = parseFloat(amtMatch[1].replace(/,/g, ''));
         cur.type = amtMatch[2] === '+' ? 'In' : 'Out';
         const afterAmt = l.slice(l.indexOf(amtMatch[0]) + amtMatch[0].length);
@@ -19957,52 +19942,38 @@ function _brParseMaybank(lines) {
         if (balNums.length) cur._balance = balNums[0];
         delete cur._pending;
       } else if (!cur._pending) {
-        if (!l.match(/^[A-Z0-9]{12,}$/) && !l.match(/^\d{10,}/) && !footerContentRe.test(l)) {
-          if (/REV|CB FROZEN/i.test(l) || /REV|CB FROZEN/i.test(cur.desc||'')) {
-            console.log(`[REV-DEBUG] APPEND to desc: date=${cur.date} amount=${cur.amount} pending=${!!cur._pending} appending=${JSON.stringify(l)} descBefore=${JSON.stringify(cur.desc)}`);
-          }
+        if (!l.match(/^[A-Z0-9]{12,}$/) && !l.match(/^\d{10,}/) && !footerContentRe.test(l) && !/^REV\s+\d{6,}/i.test(l)) {
           cur.desc += ' ' + l;
         }
       }
     }
   });
 
-  if (cur && cur.amount > 0 && cur.type) {
-    if (/REV|CB FROZEN/i.test(cur.desc||'') || Math.abs(cur.amount-324.85)<0.01 || Math.abs(cur.amount-948.85)<0.01) {
-      console.log(`[REV-DEBUG] PUSH(end of lines) date=${cur.date} amount=${cur.amount} type=${cur.type} desc=${JSON.stringify(cur.desc)}`);
-    }
-    transactions.push(cur);
-  }
+  _pushCur(cur);
 
-  const result = transactions
-    .filter(t => t.amount > 0 && t.type)
-    .map(t => {
-      let d = t.desc.replace(/\s+/g, ' ').trim();
-      // Final backstop: trim any footer content that slipped through
-      const fIdx = d.search(footerContentRe);
-      if (fIdx !== -1) d = d.slice(0, fIdx).trim();
-      return {
-        date: t.date,
-        desc: d,
-        type: t.type,
-        amount: t.amount,
-        _balance: t._balance,
-        _balanceWarning: false,
-        category: _brAutoCategory(d, t.type),
-        ref: ''
-      };
+  const seen2 = new Set();
+  const result = [];
+  for (const t of transactions) {
+    if (!(t.amount > 0 && t.type)) continue;
+    let d = (t.desc || '').replace(/\s+/g, ' ').trim();
+    const fIdx = d.search(footerContentRe);
+    if (fIdx !== -1) d = d.slice(0, fIdx).trim();
+    const fp2 = t.date + '|' + t.type + '|' + Number(t.amount).toFixed(2) + '|' + d.slice(0, 48);
+    if (seen2.has(fp2)) continue;
+    seen2.add(fp2);
+    result.push({
+      date: t.date,
+      desc: d,
+      type: t.type,
+      amount: t.amount,
+      _balance: t._balance,
+      _balanceWarning: false,
+      category: _brAutoCategory(d, t.type),
+      ref: ''
     });
-
-  // TEMP-DEBUG: final summary of every REV/CB FROZEN transaction that survived to the
-  // returned result — count + list, to see duplicates at a glance.
-  const revFinal = result.filter(t => /REV|CB FROZEN/i.test(t.desc) || Math.abs(t.amount-324.85)<0.01 || Math.abs(t.amount-948.85)<0.01);
-  console.log(`[REV-DEBUG] FINAL COUNT: ${revFinal.length} REV/CB FROZEN transactions in result`);
-  revFinal.forEach((t,i) => console.log(`[REV-DEBUG] FINAL[${i}] date=${t.date} type=${t.type} amount=${t.amount} desc=${JSON.stringify(t.desc)}`));
-
+  }
   return result;
-}
-
-// ── Balance Verifier ──────────────────────────────────────────────────────────
+}// ── Balance Verifier ──────────────────────────────────────────────────────────
 // Verify running balance math. Handles gaps (rows without balance).
 // Flags _balanceWarning: true on rows where math doesn't tally (>2 sen diff).
 
